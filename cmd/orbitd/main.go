@@ -145,6 +145,7 @@ func (m *manager) events(w http.ResponseWriter, r *http.Request) {
 		managerError(w, err)
 		return
 	}
+	m.store.benchmark.eventsReady(id, items)
 	respond(w, http.StatusOK, items)
 }
 
@@ -195,7 +196,7 @@ func isLoopbackAddress(addr string) bool {
 	return err == nil
 }
 
-func run(ctx context.Context, addr, root, python, config, token string, paths workspaceFlags, limit int) error {
+func run(ctx context.Context, addr, root, python, config, token string, paths workspaceFlags, limit int, benchmark bool) error {
 	if !isLoopbackAddress(addr) {
 		return errors.New("listen address must be a numeric loopback IP and port")
 	}
@@ -257,6 +258,9 @@ func run(ctx context.Context, addr, root, python, config, token string, paths wo
 		return err
 	}
 	defer m.store.db.Close()
+	if benchmark {
+		m.store.benchmark = &benchmarkTimings{origin: time.Now()}
+	}
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -307,6 +311,7 @@ func main() {
 	python := flag.String("python", "python", "Python interpreter with Orbit installed")
 	config := flag.String("config", "", "Orbit config path (defaults to config.json in --state)")
 	limit := flag.Int("concurrency", 1, "maximum admitted turns across workspaces")
+	benchmark := flag.Bool("benchmark-timing", false, "log local benchmark timing samples to stderr")
 	flag.Usage = func() {
 		fmt.Fprintln(flag.CommandLine.Output(), "Usage: orbitd [options]")
 		fmt.Fprintln(flag.CommandLine.Output(), "       orbitd inspect [--listen ADDR] TURN_ID")
@@ -315,7 +320,7 @@ func main() {
 	flag.Parse()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, *listen, *root, *python, *config, token, paths, *limit); err != nil {
+	if err := run(ctx, *listen, *root, *python, *config, token, paths, *limit, *benchmark); err != nil {
 		log.Fatal(err)
 	}
 }

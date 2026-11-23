@@ -170,7 +170,14 @@ class Daemon:
 
 @contextlib.contextmanager
 def daemon(
-    binary: Path, python: Path, root: Path, workspaces: dict[str, Path], limit: int, *, config: Path | None = None
+    binary: Path,
+    python: Path,
+    root: Path,
+    workspaces: dict[str, Path],
+    limit: int,
+    *,
+    config: Path | None = None,
+    benchmark_timing: bool = False,
 ):
     with socket.socket() as free_port:
         free_port.bind(("127.0.0.1", 0))
@@ -182,6 +189,8 @@ def daemon(
     for name, workspace in workspaces.items():
         command.extend(("--workspace", f"{name}={workspace}"))
     command.extend(("--concurrency", str(limit)))
+    if benchmark_timing:
+        command.append("--benchmark-timing")
     log_path = root / "daemon.log"
     with log_path.open("wb") as log:
         started_at = time.perf_counter()

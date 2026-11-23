@@ -46,7 +46,10 @@ type event struct {
 	Data       json.RawMessage `json:"data,omitempty"`
 }
 
-type store struct{ db *sql.DB }
+type store struct {
+	db        *sql.DB
+	benchmark *benchmarkTimings
+}
 
 func openStore(root string, workspaces map[string]string) (*store, error) {
 	db, err := sql.Open("sqlite", filepath.Join(root, "turns.sqlite"))
@@ -142,6 +145,7 @@ func scanTurn(row *sql.Row) (turn, error) {
 const turnSelect = `SELECT id,workspace,status,cancel_requested,conversation,prompt FROM turns`
 
 func (s *store) admit(req submission, limit int) (turn, bool, error) {
+	began := s.benchmark.startTransaction()
 	tx, err := s.db.Begin()
 	if err != nil {
 		return turn{}, false, err
@@ -177,7 +181,8 @@ func (s *store) admit(req submission, limit int) (turn, bool, error) {
 	if err := appendEvent(tx, id, "accepted", nil); err != nil {
 		return turn{}, false, err
 	}
-	return turn{ID: id, Workspace: req.Workspace, Conversation: req.Conversation, Status: "accepted"}, false, tx.Commit()
+	return turn{ID: id, Workspace: req.Workspace, Conversation: req.Conversation, Status: "accepted"}, false,
+		s.benchmark.commit(tx, began, id, "accepted")
 }
 
 func appendEvent(tx *sql.Tx, id, kind string, data json.RawMessage) error {
@@ -240,6 +245,7 @@ func (s *store) record(id, kind string, data json.RawMessage) (bool, error) {
 	default:
 		return false, fmt.Errorf("unrecognized event %q", kind)
 	}
+	began := s.benchmark.startTransaction()
 	tx, err := s.db.Begin()
 	if err != nil {
 		return false, err
@@ -256,7 +262,7 @@ func (s *store) record(id, kind string, data json.RawMessage) (bool, error) {
 	if err := appendEvent(tx, id, kind, data); err != nil {
 		return false, err
 	}
-	return true, tx.Commit()
+	return true, s.benchmark.commit(tx, began, id, kind)
 }
 
 func (s *store) events(id string, after int64) ([]event, error) {

@@ -22,6 +22,7 @@ POLL_INTERVAL = 0.002
 WARMUPS = 5
 TASK = "plain"
 REPLY = "orbitd fixture complete"
+TIMING_MARKER = "orbitd-benchmark"
 
 
 def working_set_mib(*pids: int) -> dict[int, float]:
@@ -120,11 +121,47 @@ def direct(python: Path, workspace: Path, state: Path, config: Path, samples: in
                 proc.stdout.close()
 
 
-def managed(binary: Path, python: Path, workspace: Path, state: Path, samples: int):
-    with daemon(binary, python, state, {"alpha": workspace}, 1) as client:
+def read_timing_metrics(path: Path, turn_ids: list[str]) -> list[dict[str, float]]:
+    commits: dict[str, dict[str, dict]] = {turn_id: {} for turn_id in turn_ids}
+    first_read: dict[str, int] = {}
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        fields = line.split(maxsplit=3)
+        if len(fields) != 4 or fields[2] != TIMING_MARKER:
+            continue
+        event = json.loads(fields[3])
+        turn_id = event["turn_id"]
+        if turn_id not in commits:
+            continue
+        if event["phase"] == "commit":
+            kind = event["kind"]
+            assert kind not in commits[turn_id], (turn_id, kind)
+            commits[turn_id][kind] = event
+        elif event["phase"] == "events_ready":
+            first_read[turn_id] = min(first_read.get(turn_id, event["at_ns"]), event["at_ns"])
+
+    results = []
+    for turn_id in turn_ids:
+        stages = commits[turn_id]
+        assert set(stages) == {"accepted", "dispatching", "running", "reply", "completed"}, (turn_id, stages)
+        assert turn_id in first_read, f"missing completed event query timing for {turn_id}"
+        after_admission = [stage for name, stage in stages.items() if name != "accepted"]
+        results.append(
+            {
+                "admission_transaction_ms": stages["accepted"]["transaction_ns"] / 1e6,
+                "post_admission_transactions_ms": sum(stage["transaction_ns"] for stage in after_admission) / 1e6,
+                "all_sqlite_commits_ms": sum(stage["commit_ns"] for stage in stages.values()) / 1e6,
+                "completed_commit_to_events_ready_ms": (first_read[turn_id] - stages["completed"]["at_ns"]) / 1e6,
+            }
+        )
+    return results
+
+
+def managed(binary: Path, python: Path, workspace: Path, state: Path, samples: int, *, benchmark_timing=False):
+    with daemon(binary, python, state, {"alpha": workspace}, 1, benchmark_timing=benchmark_timing) as client:
         workers = wait_for(client.workers, interval=POLL_INTERVAL)
         startup_ms = 1000 * (time.perf_counter() - client.started_at)
         results = []
+        measured_turns = []
         for index in range(WARMUPS + samples):
             began = time.perf_counter()
             code, turn = client.submit("alpha", f"sample-{index}", TASK)
@@ -133,30 +170,45 @@ def managed(binary: Path, python: Path, workspace: Path, state: Path, samples: i
             turn_id = turn["turn_id"]
             cursor = 0
             seen = {}
+            final_query_ms = 0.0
 
             def completed():
-                nonlocal cursor
+                nonlocal cursor, final_query_ms
+                query_began = time.perf_counter()
                 events = client.events(turn_id, cursor)
                 observed = time.perf_counter()
                 for event in events:
                     cursor = event["seq"]
                     seen[event["kind"]] = observed, event
-                return "completed" in seen
+                if "completed" in seen:
+                    final_query_ms = 1000 * (observed - query_began)
+                    return True
+                return False
 
             wait_for(completed, timeout=30, interval=POLL_INTERVAL)
             assert seen["reply"][1]["data"]["text"] == REPLY
             assert seen["completed"][1]["data"]["tool_calls"] == 0
             if index >= WARMUPS:
+                measured_turns.append(turn_id)
                 results.append(
                     {
                         "submit_ack_ms": 1000 * (ack - began),
                         "submit_to_running_ms": 1000 * (seen["running"][0] - began),
                         "submit_to_completed_ms": 1000 * (seen["completed"][0] - began),
+                        "final_events_get_ms": final_query_ms,
                     }
                 )
         assert client.workers() == workers, "Worker restarted during the benchmark"
         rss = working_set_mib(client.pid, workers["alpha"])
-        return startup_ms, results, {"daemon": rss[client.pid], "worker": rss[workers["alpha"]]}
+        memory = {"daemon": rss[client.pid], "worker": rss[workers["alpha"]]}
+    if benchmark_timing:
+        timings = read_timing_metrics(state / "daemon.log", measured_turns)
+        for sample, stages in zip(results, timings, strict=True):
+            sample.update(stages)
+            sample["ack_outside_admission_transaction_ms"] = (
+                sample["submit_ack_ms"] - stages["admission_transaction_ms"]
+            )
+    return startup_ms, results, memory
 
 
 def summary(values):
@@ -168,11 +220,14 @@ def summary(values):
     }
 
 
-def benchmark(binary: Path, python: Path, root: Path, port: int, rounds: int, samples: int):
-    runs = {"direct": [], "managed": []}
+def benchmark(binary: Path, python: Path, root: Path, port: int, rounds: int, samples: int, *, timings=False):
+    modes = ("direct", "managed", "managed_timed") if timings else ("direct", "managed")
+    runs = {mode: [] for mode in modes}
     for index in range(rounds):
-        order = ("direct", "managed") if index % 2 == 0 else ("managed", "direct")
+        offset = index % len(modes)
+        order = modes[offset:] + modes[:offset]
         for mode in order:
+            print(f"Round {index + 1}/{rounds}: {mode}", file=sys.stderr, flush=True)
             trial = root / f"{mode}-{index}"
             workspace, state = trial / "workspace", trial / "state"
             workspace.mkdir(parents=True)
@@ -182,7 +237,9 @@ def benchmark(binary: Path, python: Path, root: Path, port: int, rounds: int, sa
             if mode == "direct":
                 startup, turns, rss = direct(python, workspace, state, config, samples)
             else:
-                startup, turns, rss = managed(binary, python, workspace, state, samples)
+                startup, turns, rss = managed(
+                    binary, python, workspace, state, samples, benchmark_timing=mode == "managed_timed"
+                )
             runs[mode].append({"startup_ms": startup, "turns": turns, "working_set_mib": rss})
     results = {}
     for mode, trials in runs.items():
@@ -204,6 +261,7 @@ def main():
     parser.add_argument("--python", type=Path, default=Path(sys.executable))
     parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument("--samples", type=int, default=20, help="warm turns per mode per round")
+    parser.add_argument("--timings", action="store_true", help="add a timed daemon alongside the baseline")
     args = parser.parse_args()
     if args.rounds < 1 or args.samples < 1:
         parser.error("--rounds and --samples must be positive")
@@ -211,7 +269,13 @@ def main():
         binary_hash = hashlib.file_digest(binary_file, "sha256").hexdigest()
     with model_fixture() as port, tempfile.TemporaryDirectory(prefix="orbitd-bench-") as directory:
         report = benchmark(
-            args.orbitd.resolve(), args.python.resolve(), Path(directory), port, args.rounds, args.samples
+            args.orbitd.resolve(),
+            args.python.resolve(),
+            Path(directory),
+            port,
+            args.rounds,
+            args.samples,
+            timings=args.timings,
         )
     report["settings"] = {
         "platform": platform.platform(),
@@ -221,6 +285,7 @@ def main():
         "warmups_per_round": WARMUPS,
         "samples_per_round": args.samples,
         "http_poll_interval_ms": 1000 * POLL_INTERVAL,
+        "benchmark_timings": args.timings,
     }
     print(json.dumps(report, indent=2))
 
