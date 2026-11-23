@@ -23,6 +23,27 @@ Go 未加入 `PATH` 时，可传入 `-GoExecutable 'C:\path\to\go.exe'`。已有
 脚本还核对了取消后继续复用 Worker，以及读取临时 README 后在回复中返回真实校验码。表中数据
 来自确定性的本机模型响应，执行使用 Orbit 的 Provider 适配器、Scheduler、AgentLoop 和文件工具。
 
+## Go 管理器中途退出
+
+构建 `orbitd.exe` 后，可独立运行这项验收。脚本使用本机模型夹具、真实文件工具和独立的临时
+状态目录，强制结束的是这次测试启动的 Go 进程。
+
+```powershell
+go build -o orbitd.exe ./cmd/orbitd
+.\.venv\Scripts\python.exe tests/integration/verify_orbitd_manager_crash.py --orbitd .\orbitd.exe
+```
+
+- **接单后、派发前。** 用 Worker 的真实文件锁阻止它就绪。提交返回 `202`，唯一落盘事件是
+  `accepted`。强制结束 Go 后释放锁，用同一状态目录启动新管理器，核对原 Turn ID 能完成且
+  文件只写一次。
+- **工具写完、终态前。** 让模型夹具暂缓返回最终回复，看到 `edit_file` 完成事件和文件写入后
+  结束 Go。重启前等待旧 Worker 退出，重启后核对事件、原 Turn ID、新 Worker 和文件行数。
+
+2026-11-23 在 Windows 11 实测通过。第一组保留原 `accepted` 事件和 Turn ID，随后写入一次并
+进入 `completed`。第二组保留故障前的 5 条事件，追加原因是 `manager_restarted` 的
+`unknown` 终态。同键重试返回 HTTP 200 和原 Turn ID，文件仍只有一行 `written`。旧 Worker
+已退出，更换 PID 的新 Worker 成功完成另一条任务。
+
 ## 真实模型冒烟
 
 本机使用 Qwen3-1.7B Q4_K_M 和 llama.cpp b12651，通过 OpenAI-compatible 接口接入 Orbit 的

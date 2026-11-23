@@ -114,8 +114,18 @@ def fixture_env():
 class Daemon:
     port: int
     token: str
-    pid: int
+    process: subprocess.Popen
     started_at: float
+
+    @property
+    def pid(self) -> int:
+        return self.process.pid
+
+    def crash(self) -> None:
+        assert self.process.poll() is None, "orbitd exited before fault injection"
+        self.process.kill()
+        exit_code = self.process.wait(timeout=12)
+        assert exit_code != 0, "orbitd exited normally during fault injection"
 
     def request(self, path, body=None, method=None, auth=True):
         headers = {"Authorization": f"Bearer {self.token}"} if auth else {}
@@ -133,20 +143,24 @@ class Daemon:
         except urllib.error.HTTPError as error:
             return error.code, json.load(error)
 
-    def workers(self):
+    def health(self):
         try:
             code, report = self.request("/health")
         except urllib.error.URLError:
             return None
-        return report["workers"] if code == 200 and all(report["workers"].values()) else None
+        return report if code == 200 else None
+
+    def workers(self):
+        report = self.health()
+        return report["workers"] if report and all(report["workers"].values()) else None
 
     def submit(self, workspace, key, text, *, conversation=None):
         return self.request(
             "/turns", {"workspace": workspace, "conversation_id": conversation or key, "request_key": key, "text": text}
         )
 
-    def status(self, turn_id, expected):
-        return wait_for(lambda: self.request(f"/turns/{turn_id}")[1]["status"] == expected)
+    def status(self, turn_id, expected, *, timeout=40):
+        return wait_for(lambda: self.request(f"/turns/{turn_id}")[1]["status"] == expected, timeout=timeout)
 
     def events(self, turn_id, after=0):
         code, value = self.request(f"/turns/{turn_id}/events?after={after}")
@@ -173,13 +187,14 @@ def daemon(
         started_at = time.perf_counter()
         proc = subprocess.Popen(command, env={**fixture_env(), "ORBITD_TOKEN": token}, stdout=log, stderr=log)
         try:
-            yield Daemon(port, token, proc.pid, started_at)
+            yield Daemon(port, token, proc, started_at)
         except BaseException:
             print(log_path.read_text(encoding="utf-8", errors="replace")[-12000:], file=sys.stderr)
             raise
         finally:
-            proc.terminate()
-            proc.wait(timeout=12)
+            if proc.poll() is None:
+                proc.terminate()
+                proc.wait(timeout=12)
 
 
 def readme_turn(client: Daemon, workspace: Path):
