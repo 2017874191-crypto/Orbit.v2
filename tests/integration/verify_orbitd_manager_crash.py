@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import tempfile
@@ -116,6 +117,17 @@ def verify(binary: Path, python: Path, home: Path, port: int) -> None:
         assert history[:-1] == before_crash
         assert history[-1]["kind"] == "unknown" and history[-1]["data"]["reason"] == "manager_restarted"
 
+        inspection = subprocess.check_output(
+            [str(binary), "inspect", "--listen", f"127.0.0.1:{client.port}", running_id],
+            env={**os.environ, "ORBITD_TOKEN": client.token},
+            text=True,
+            timeout=12,
+        )
+        assert f"Turn: {running_id}" in inspection, inspection
+        assert "Status: unknown" in inspection and "Reason: manager_restarted" in inspection, inspection
+        assert "edit_file complete (succeeded)" in inspection, inspection
+        assert client.events(running_id) == history
+
         code, fresh = client.submit("alpha", "after-manager-crash", "plain")
         assert code == 202 and fresh["turn_id"] != running_id, (code, fresh)
         client.status(fresh["turn_id"], "completed", timeout=90)
@@ -124,6 +136,8 @@ def verify(binary: Path, python: Path, home: Path, port: int) -> None:
         print(f"Manager crash after tool write: {running_id} -> unknown (manager_restarted), 1 write.")
         print(f"Preserved {len(before_crash)} prior events and original Turn ID; Worker {old_pid} exited.")
         print(f"Replacement Worker {new_pid} completed a new Turn.")
+        print("Read-only inspection of the interrupted Turn:")
+        print(inspection, end="")
 
 
 def main() -> None:

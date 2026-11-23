@@ -13,7 +13,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const activeStates = "('accepted','dispatching','running')"
+const (
+	activeStates  = "('accepted','dispatching','running')"
+	eventPageSize = 200
+)
 
 var (
 	errBusy     = errors.New("concurrency limit reached")
@@ -257,7 +260,7 @@ func (s *store) record(id, kind string, data json.RawMessage) (bool, error) {
 }
 
 func (s *store) events(id string, after int64) ([]event, error) {
-	rows, err := s.db.Query(`SELECT seq,kind,observed_at,COALESCE(data,'') FROM events WHERE turn_id=? AND seq>? ORDER BY seq LIMIT 200`, id, after)
+	rows, err := s.db.Query(`SELECT seq,kind,observed_at,COALESCE(data,'') FROM events WHERE turn_id=? AND seq>? ORDER BY seq LIMIT ?`, id, after, eventPageSize)
 	if err != nil {
 		return nil, err
 	}

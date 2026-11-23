@@ -44,6 +44,9 @@ go build -o orbitd.exe ./cmd/orbitd
 `unknown` 终态。同键重试返回 HTTP 200 和原 Turn ID，文件仍只有一行 `written`。旧 Worker
 已退出，更换 PID 的新 Worker 成功完成另一条任务。
 
+第二组还会真实调用 [`orbitd inspect`](orbitd.zh-CN.md#核查-unknown-任务)，核对它能读出
+`manager_restarted` 和已成功完成的 `edit_file`，并逐条比较核查前后的历史事件。
+
 ## 真实模型冒烟
 
 本机使用 Qwen3-1.7B Q4_K_M 和 llama.cpp b12651，通过 OpenAI-compatible 接口接入 Orbit 的

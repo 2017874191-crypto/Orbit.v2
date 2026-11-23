@@ -29,6 +29,8 @@ import (
 
 var identifier = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 
+const defaultListenAddr = "127.0.0.1:9062"
+
 type workspaceFlags map[string]string
 
 func (f workspaceFlags) String() string { return fmt.Sprint(map[string]string(f)) }
@@ -184,9 +186,17 @@ func containsPath(root, path string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
 
+func isLoopbackAddress(addr string) bool {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || !net.ParseIP(host).IsLoopback() {
+		return false
+	}
+	_, err = strconv.ParseUint(port, 10, 16)
+	return err == nil
+}
+
 func run(ctx context.Context, addr, root, python, config, token string, paths workspaceFlags, limit int) error {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
+	if !isLoopbackAddress(addr) {
 		return errors.New("listen address must be a numeric loopback IP and port")
 	}
 	if len(paths) == 0 || root == "" || limit < 1 || len(token) < 16 {
@@ -195,7 +205,7 @@ func run(ctx context.Context, addr, root, python, config, token string, paths wo
 	if err := os.MkdirAll(root, 0700); err != nil {
 		return err
 	}
-	root, err = absolute(root)
+	root, err := absolute(root)
 	if err != nil {
 		return err
 	}
@@ -282,17 +292,30 @@ func run(ctx context.Context, addr, root, python, config, token string, paths wo
 }
 
 func main() {
+	token := os.Getenv("ORBITD_TOKEN")
+	if len(os.Args) > 1 && os.Args[1] == "inspect" {
+		if err := inspectCommand(os.Args[2:], token, os.Stdout); err != nil && !errors.Is(err, flag.ErrHelp) {
+			log.Fatal(err)
+		}
+		return
+	}
+
 	paths := workspaceFlags{}
 	flag.Var(paths, "workspace", "configured workspace as id=directory (repeatable)")
-	listen := flag.String("listen", "127.0.0.1:9062", "local HTTP API address")
+	listen := flag.String("listen", defaultListenAddr, "local HTTP API address")
 	root := flag.String("state", "", "dedicated orbitd state directory")
 	python := flag.String("python", "python", "Python interpreter with Orbit installed")
 	config := flag.String("config", "", "Orbit config path (defaults to config.json in --state)")
 	limit := flag.Int("concurrency", 1, "maximum admitted turns across workspaces")
+	flag.Usage = func() {
+		fmt.Fprintln(flag.CommandLine.Output(), "Usage: orbitd [options]")
+		fmt.Fprintln(flag.CommandLine.Output(), "       orbitd inspect [--listen ADDR] TURN_ID")
+		flag.PrintDefaults()
+	}
 	flag.Parse()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, *listen, *root, *python, *config, os.Getenv("ORBITD_TOKEN"), paths, *limit); err != nil {
+	if err := run(ctx, *listen, *root, *python, *config, token, paths, *limit); err != nil {
 		log.Fatal(err)
 	}
 }
