@@ -21,6 +21,8 @@ htmlcov/
 
 dist/
 build/
+/orbitd
+/orbitd.exe
 ui-tui/dist/
 ui-tui/coverage/
 ui-tui/.vitest-cache/

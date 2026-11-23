@@ -26,6 +26,10 @@ Orbit 是一套紧凑的 Agent Harness。不同入口不用各自实现 Agent Lo
 持久化、Tracing 和投递。外部 Memory Backend 可以接入这套 Runtime，但当前发布
 不包含外部 Memory 实现。
 
+Orbit.v2 提供可选的本地工作区管理器 `orbitd`。由 Go 监督 Python Worker，通过本机 API
+提交与取消 Turn，并在 SQLite 中保留执行状态及关键事件。使用方式和故障演示见
+[本地工作区托管](docs/onboarding/orbitd.zh-CN.md)。
+
 ```mermaid
 flowchart LR
     U["你"] --> H["CLI · TUI · Gateway · Cron · 飞书"]
