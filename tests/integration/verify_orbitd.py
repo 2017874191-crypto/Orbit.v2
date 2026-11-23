@@ -244,7 +244,8 @@ def acceptance(binary: Path, python: Path, home: Path, model_port: int):
                 ),
                 headers={"Authorization": f"Bearer {client.token}", "Content-Type": "application/json"},
             )
-        wait_for(lambda: Model.edits["edit-once"] == 1)
+        # The first request includes lazy Provider initialization in a fresh Python environment.
+        wait_for(lambda: Model.edits["edit-once"] == 1, timeout=90)
         code, first = submit("alpha", "duplicate", "edit-once")
         assert code == 200
         turn_id = first["turn_id"]

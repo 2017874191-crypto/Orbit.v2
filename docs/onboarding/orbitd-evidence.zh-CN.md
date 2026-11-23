@@ -1,11 +1,15 @@
 # Orbit.v2 实验与五分钟演示
 
-在仓库根目录先完成[安装与构建](orbitd.zh-CN.md#启动)。演示命令会启动本机模型夹具和实际
-Go、Python 进程，用临时工作区与状态目录运行。
+在 Windows 上准备 Go 1.24+ 和 `uv`，从 V2 的 `local-worker` 分支检出代码后在根目录
+执行演示。脚本会根据锁文件准备 Python 3.12 环境，构建 Go 管理器，并用临时工作区和本机
+模型夹具运行实际的 Worker。首次执行可能需要下载依赖。
 
 ```powershell
-.\.venv\Scripts\python.exe tests/integration/verify_orbitd.py --orbitd .\orbitd.exe
+.\scripts\demo-orbitd.ps1
 ```
+
+Go 未加入 `PATH` 时，可传入 `-GoExecutable 'C:\path\to\go.exe'`。已有环境和二进制时
+可以直接运行[托管验收脚本](orbitd.zh-CN.md#运行验收)。
 
 ## 可靠性对照
 
@@ -71,6 +75,9 @@ Go、Python 进程，用临时工作区与状态目录运行。
 
 ## 五分钟演示顺序
 
+开场可以从一个故障讲起：“我在一台机器上同时运行两个工作区的 Agent。其中一个已经改完文件，
+却在回报结果前退出。我需要查清执行记录、让它恢复接单，并避免重试时重复改文件。”
+
 1. **第 1 分钟**启动验收脚本，介绍 Go 负责接单、跨工作区准入、记账和拉起进程，Python 负责模型、
    工具和 Session。说明两个工作区有独立 Worker，使用一个管理器。
 2. **第 2 分钟**对照 `Dedup` 和 `Quota` 的输出。请求键解决客户端重试，整机额度解决两个
@@ -79,6 +86,10 @@ Go、Python 进程，用临时工作区与状态目录运行。
    仍未返回最终结果时。用一行与两行的差异解释为什么只重启进程，并保留旧 Turn 的 `unknown`。
 4. **第 5 分钟**展示 `Restart` 和性能表。说明请求键保护提交入口，工具写文件与 SQLite 提交各自
    独立，`unknown` 下的重试需要先看事件和文件。
+
+被问到 Go 的必要性时，可以说明单工作区继续走 Orbit 的 Python 入口。多个 Worker 需要共享准入
+和恢复记录时，`orbitd` 提供独立的本机管理进程。Go 在这里承担进程生命周期和 HTTP，原有
+AgentLoop 继续由 Python 执行。面试时用下面的测量数据说明这层管理的实际成本。
 
 ## 复测性能
 

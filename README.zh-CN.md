@@ -1,6 +1,6 @@
 <div align="center">
 
-# Orbit
+# Orbit.v2
 
 ### 一套 Agent Runtime，跟你去每个工作入口。
 
@@ -26,9 +26,21 @@ Orbit 是一套紧凑的 Agent Harness。不同入口不用各自实现 Agent Lo
 持久化、Tracing 和投递。外部 Memory Backend 可以接入这套 Runtime，但当前发布
 不包含外部 Memory 实现。
 
-Orbit.v2 提供可选的本地工作区管理器 `orbitd`。由 Go 监督 Python Worker，通过本机 API
-提交与取消 Turn，并在 SQLite 中保留执行状态及关键事件。使用方式和故障演示见
-[本地工作区托管](docs/onboarding/orbitd.zh-CN.md)。
+## 本地工作区托管演示
+
+可选的 Go 管理器 `orbitd` 监督 Python Worker，统一控制整机并发、去重提交，并在 SQLite
+中保留状态和事件。演示会在 Worker 改完文件后终止进程。旧任务进入 `unknown`，文件保留
+一次写入，新 Worker 继续接单。
+
+Windows 上准备 Go 1.24+ 和 `uv`，在仓库根目录执行以下命令。脚本会构建 `orbitd`、
+准备 Python 环境，并用本机固定模型响应复现结果。
+
+```powershell
+.\scripts\demo-orbitd.ps1
+```
+
+[托管使用指南](docs/onboarding/orbitd.zh-CN.md) ·
+[五分钟演示与实测对照](docs/onboarding/orbitd-evidence.zh-CN.md)
 
 ```mermaid
 flowchart LR
@@ -48,8 +60,8 @@ flowchart LR
 Orbit 需要 Python 3.12。本机展示时，克隆仓库并以可编辑工具方式安装：
 
 ```powershell
-git clone https://github.com/2017874191-crypto/Orbit.git
-Set-Location Orbit
+git clone --branch local-worker --single-branch https://github.com/2017874191-crypto/Orbit.v2.git
+Set-Location Orbit.v2
 uv tool install --editable .
 ```
 

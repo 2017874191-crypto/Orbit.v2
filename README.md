@@ -1,6 +1,6 @@
 <div align="center">
 
-# Orbit
+# Orbit.v2
 
 ### One Agent Runtime across every place you work.
 
@@ -28,6 +28,25 @@ cancellation, Context assembly, tool execution, Session persistence, Tracing,
 and delivery. Optional Memory backends plug into that Runtime, but this release
 does not bundle an external Memory implementation.
 
+## Demo the local worker supervisor
+
+`orbitd` is an optional Go supervisor for Orbit’s Python workers. It sets a
+machine-wide Turn limit, deduplicates submissions, and keeps execution status
+and events in SQLite. In the crash demo, a worker dies after editing a file.
+The original Turn becomes `unknown`, the replacement worker accepts new
+work, and the file still contains one edit.
+
+On Windows, run the demo from this checkout with Go 1.24+ and `uv`
+available. It builds `orbitd`, prepares the Python environment, and uses a
+local model fixture for reproducible results.
+
+```powershell
+.\scripts\demo-orbitd.ps1
+```
+
+[Supervisor setup (中文)](docs/onboarding/orbitd.zh-CN.md) ·
+[Five-minute demo and measured trade-offs (中文)](docs/onboarding/orbitd-evidence.zh-CN.md)
+
 ```mermaid
 flowchart LR
     U["You"] --> H["CLI · TUI · Gateway · Cron · Feishu"]
@@ -46,8 +65,8 @@ flowchart LR
 Orbit requires Python 3.12. Clone the repository and install it locally as an editable tool:
 
 ```bash
-git clone https://github.com/2017874191-crypto/Orbit.git
-cd Orbit
+git clone --branch local-worker --single-branch https://github.com/2017874191-crypto/Orbit.v2.git
+cd Orbit.v2
 uv tool install --editable .
 ```
 
