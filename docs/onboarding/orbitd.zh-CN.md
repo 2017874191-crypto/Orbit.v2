@@ -69,10 +69,16 @@ go test ./...
 ```
 
 验收脚本启动本机模型夹具和两个实际 Worker，用临时工作区运行真实的 `edit_file` 工具。
-脚本验证同键重复提交只写一行、额度从 1 改为 2 时两个工作区可以同时执行、取消后 Worker
-可继续接单，以及工具写完文件后杀掉 Worker 时旧任务变为 `unknown`、文件只写一次、替换的进程
-能够完成新任务。对照组用新请求键主动重放故障任务，检查同一文件是否出现第二次写入。脚本还
-检查管理器重启后的持久记录和事件游标。
+脚本逐项打印去重、并发准入、取消、崩溃恢复和重启后的事件记录。复现实验、性能数字和演示流程
+见 [Orbit.v2 实验报告](orbitd-evidence.zh-CN.md)。
+
+已有配置了真实模型的 V2 专用配置时，可以单独运行 README 冒烟。脚本会创建一份含随机校验码
+的临时 README，核对 `read_file` 成功事件和最终回复中的校验码。这条命令会调用配置中的模型。
+
+```powershell
+.\.venv\Scripts\python.exe tests/integration/verify_orbitd.py --orbitd .\orbitd.exe `
+  --provider-config "$env:LOCALAPPDATA\OrbitV2\config.json"
+```
 
 托管模式当前按单用户可信工作区部署，额度按在途 Turn 计数。事件通过游标拉取，模型输出以
 最终文本送达。交互提问、子 Agent、消息渠道和 Cron 继续使用终端或 Gateway 场景。
