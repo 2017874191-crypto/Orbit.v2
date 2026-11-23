@@ -19,6 +19,56 @@ Go、Python 进程，用临时工作区与状态目录运行。
 脚本还核对了取消后继续复用 Worker，以及读取临时 README 后在回复中返回真实校验码。表中数据
 来自确定性的本机模型响应，执行使用 Orbit 的 Provider 适配器、Scheduler、AgentLoop 和文件工具。
 
+## 真实模型冒烟
+
+本机使用 Qwen3-1.7B Q4_K_M 和 llama.cpp b12651，通过 OpenAI-compatible 接口接入 Orbit 的
+`custom` Provider。[模型权重](https://huggingface.co/ggml-org/Qwen3-1.7B-GGUF) ·
+[推理服务版本](https://github.com/ggml-org/llama.cpp/releases/tag/b12651)
+
+2026-11-23 实测通过。Turn `5e34918d9a9d893360ac17cde11cd058` 以 `completed` 结束，
+模型的总结带回了仅写在临时 README 中的随机校验码。Go 共落盘 15 条事件，其中有 5 次成功的
+`read_file` 开始及结束记录，工具失败数为 0。重复读取反映这次模型的工具选择，事件保留了每次调用。
+
+模型服务已就绪时，从提交到客户端读到终态为 29.76 秒。该样本包含 Worker 的首次 Provider
+调用、实际推理和事件查询。下文的性能表使用固定模型夹具单独测量托管路径。
+
+在 Windows Vulkan 版 llama.cpp 中，先用 `llama-server.exe --list-devices` 确认设备名。
+本次 RTX 4060 Laptop GPU 对应 `Vulkan1`。
+
+```powershell
+.\llama-server.exe -m .\Qwen3-1.7B-Q4_K_M.gguf --host 127.0.0.1 --port 16384 `
+  --alias qwen3-1.7b --jinja --reasoning off --ctx-size 8192 --parallel 1 `
+  --device Vulkan1 --n-gpu-layers 99
+```
+
+使用以下 V2 专用配置。此次任务只暴露 `read_file`，用来验证真实模型调用、工具执行和结果回填。
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "openai/qwen3-1.7b",
+      "provider": "custom",
+      "maxTokens": 512,
+      "maxToolIterations": 4,
+      "contextWindowTokens": 8192,
+      "temperature": 0
+    }
+  },
+  "providers": {
+    "custom": {"apiKey": "local-only", "apiBase": "http://127.0.0.1:16384/v1"}
+  },
+  "tools": {
+    "disabledTools": ["exec", "web_search", "web_fetch", "write_file", "edit_file", "list_dir", "grep", "find", "skill_read"]
+  },
+  "memory": {"backend": null},
+  "callEfficiency": {"mode": "off"},
+  "tracing": {"enabled": false}
+}
+```
+
+运行[README 冒烟命令](orbitd.zh-CN.md#运行验收)，可用 `--smoke-report` 保存事件 JSON。
+
 ## 五分钟演示顺序
 
 1. **第 1 分钟**启动验收脚本，介绍 Go 负责接单、跨工作区准入、记账和拉起进程，Python 负责模型、
@@ -59,4 +109,4 @@ Go 1.27.4。本次构建使用 `3c2a893` 的托管实现。每路共 60 条预�
 
 这组负载下，托管的冷启动中位数增加约 375 ms，完成延迟 P95 增加约 130 ms。这个差值反映
 两种客户端路径的整体差异，包含持久化和轮询。测量范围是一台机器、一个 Worker、顺序短 Turn，
-支持讨论本机托管成本。真实 Provider 的模型与网络耗时需在配置相应模型后单独测量。
+支持讨论本机托管成本。真实模型冒烟是独立的功能验证，其耗时单独记录。

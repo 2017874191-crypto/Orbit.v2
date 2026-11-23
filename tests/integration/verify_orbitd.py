@@ -187,6 +187,7 @@ def readme_turn(client: Daemon, workspace: Path):
     (workspace / "README.md").write_text(
         f"# Orbit smoke test\n\nThis workspace checks tool access. Verification code: {marker}\n", encoding="utf-8"
     )
+    started_at = time.perf_counter()
     code, turn = client.submit("alpha", "readme-smoke", READ_TASK)
     assert code == 202, (code, turn)
     turn_id = turn["turn_id"]
@@ -198,6 +199,7 @@ def readme_turn(client: Daemon, workspace: Path):
         return None
 
     events = wait_for(terminal_events, timeout=60, interval=0.2)
+    elapsed_ms = round((time.perf_counter() - started_at) * 1000)
     assert events[-1]["kind"] == "completed", events[-1]
     assert any(
         e["kind"] == "tool"
@@ -210,6 +212,7 @@ def readme_turn(client: Daemon, workspace: Path):
         "Reply omitted the verification code"
     )
     print(f"README smoke: {turn_id} -> read_file succeeded, verification code present in final reply.")
+    return {"turn_id": turn_id, "elapsed_ms": elapsed_ms, "events": events}
 
 
 def acceptance(binary: Path, python: Path, home: Path, model_port: int):
@@ -378,7 +381,15 @@ def main():
     parser.add_argument("--orbitd", type=Path, required=True)
     parser.add_argument("--python", type=Path, default=Path(sys.executable))
     parser.add_argument("--provider-config", type=Path, help="run only the README smoke with this Orbit config")
+    parser.add_argument(
+        "--smoke-report", type=Path, help="write the successful provider smoke event JSON to a new file"
+    )
     args = parser.parse_args()
+    if args.smoke_report is not None:
+        if args.provider_config is None:
+            parser.error("--smoke-report requires --provider-config")
+        if args.smoke_report.exists():
+            parser.error("--smoke-report must name a new file")
     binary, python = args.orbitd.resolve(strict=True), args.python.resolve(strict=True)
     with tempfile.TemporaryDirectory(prefix="orbitd-check-") as directory:
         home = Path(directory)
@@ -393,7 +404,11 @@ def main():
             binary, python, root, {"alpha": alpha}, 1, config=args.provider_config.resolve(strict=True)
         ) as client:
             wait_for(client.workers)
-            readme_turn(client, alpha)
+            report = readme_turn(client, alpha)
+        if args.smoke_report is not None:
+            with args.smoke_report.open("x", encoding="utf-8") as output:
+                json.dump(report, output, ensure_ascii=False, indent=2)
+                output.write("\n")
 
 
 if __name__ == "__main__":

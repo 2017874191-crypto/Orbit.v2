@@ -73,11 +73,13 @@ go test ./...
 见 [Orbit.v2 实验报告](orbitd-evidence.zh-CN.md)。
 
 已有配置了真实模型的 V2 专用配置时，可以单独运行 README 冒烟。脚本会创建一份含随机校验码
-的临时 README，核对 `read_file` 成功事件和最终回复中的校验码。这条命令会调用配置中的模型。
+的临时 README，核对 `read_file` 成功事件和最终回复中的校验码。这条命令会调用配置中的模型，
+并可选用 `--smoke-report` 将成功 Turn 的事件、最终回复和耗时写入新的 JSON 文件。
 
 ```powershell
+$smokeReport = Join-Path $env:TEMP "orbitd-smoke-$([Guid]::NewGuid().ToString('N')).json"
 .\.venv\Scripts\python.exe tests/integration/verify_orbitd.py --orbitd .\orbitd.exe `
-  --provider-config "$env:LOCALAPPDATA\OrbitV2\config.json"
+  --provider-config "$env:LOCALAPPDATA\OrbitV2\config.json" --smoke-report $smokeReport
 ```
 
 托管模式当前按单用户可信工作区部署，额度按在途 Turn 计数。事件通过游标拉取，模型输出以
